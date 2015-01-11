@@ -1,0 +1,18 @@
+// SqrlTray.idl : IDL source for SqrlTray
+//
+
+// This file will be processed by the MIDL tool to
+// produce the type library (SqrlTray.tlb) and marshalling code.
+
+import "oaidl.idl";
+import "ocidl.idl";
+
+[
+	uuid(A5F2AB3E-F50A-4706-B7E9-C81B53B1B015),
+	version(1.0),
+]
+library SqrlTrayLib
+{
+	importlib("stdole2.tlb");
+};
+
