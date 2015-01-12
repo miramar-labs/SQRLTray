@@ -8,6 +8,12 @@
 #include "SqrlSettingsDlg.h"
 #include "SqrlAboutDlg.h"
 
+//Include novaPDF headers
+#include "..\novaSDK\include\novaOptions.h"
+
+//NovaPdfOptions
+#include "..\novaSDK\include\novapi.h"
+
 using namespace ATL;
 
 class CSqrlTrayModule : public ATL::CAtlExeModuleT< CSqrlTrayModule >
@@ -42,6 +48,19 @@ BOOL CALLBACK TrayProc(HWND, UINT, WPARAM, LPARAM);
 // Data 
 const int WM_EX_MESSAGE = (WM_APP + 1);
 const int SQRL_TRAY_ICON_ID = 1966;
+
+//register File Saved message for novaPDF Printer
+const UINT  wm_Nova_StartDoc = RegisterWindowMessageW(MSG_NOVAPDF2_STARTDOC);
+const UINT  wm_Nova_EndDoc = RegisterWindowMessageW(MSG_NOVAPDF2_ENDDOC);
+const UINT  wm_Nova_FileSaved = RegisterWindowMessageW(MSG_NOVAPDF2_FILESAVED);
+const UINT  wm_Nova_PrintError = RegisterWindowMessageW(MSG_NOVAPDF2_PRINTERROR);
+
+#define PRINTER_NAME        L"novaPDF SDK 8"
+#define SMALL_SIZE_PROFILE  L"Small Size Profile"
+#define FULL_OPT_PROFILE    L"Full Options Profile"
+#define PROFILE_IS_PUBLIC   0
+
+INovaPdfOptions80 *m_novaOptions;
 
 //
 extern "C" int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, 
@@ -101,6 +120,23 @@ extern "C" int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/
 
 	ATLTRACE("SqrlTray: ready!");
 
+	//create an instance of INovaPdfOptions
+	HRESULT hr = CoCreateInstance(__uuidof(NovaPdfOptions80), NULL, CLSCTX_INPROC_SERVER, __uuidof(INovaPdfOptions80), (LPVOID*)&m_novaOptions);
+	if (SUCCEEDED(hr))
+	{
+		// initialize the NovaPdfOptions object to use with a printer licensed for SDK
+		// if you have an application license for novaPDF SDK, 
+		// pass the license key to the Initialize() function
+		hr = m_novaOptions->Initialize(PRINTER_NAME, L"");
+
+		hr = m_novaOptions->RegisterEventWindow((LONG)g_hWndTray);
+	}
+	else
+	{
+		::MessageBoxW(NULL, L"Failed to create novaPDF COM object", L"novaPDF", MB_OK);
+	}
+
+
 	MSG msg;
 	while (GetMessage(&msg, NULL, 0, 0))
 	{
@@ -132,54 +168,68 @@ extern "C" int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/
 
 BOOL CALLBACK TrayProc(HWND hDlg, UINT uiMsg, WPARAM wParam, LPARAM lParam)
 {
+	if (uiMsg == wm_Nova_FileSaved){
+		ATLTRACE("MSG_NOVAPDF2_FILESAVED....");
+	}
+	else if (uiMsg == wm_Nova_StartDoc){
+		ATLTRACE("MSG_NOVAPDF2_STARTDOC....");
+	}
+	else if (uiMsg == wm_Nova_EndDoc){
+		ATLTRACE("MSG_NOVAPDF2_ENDDOC....");
+	}
+	else if (uiMsg == wm_Nova_PrintError){
+		ATLTRACE("MSG_NOVAPDF2_PRINTERROR....");
+	}
+	else{
 
-	switch (uiMsg)
-	{
-
-	case WM_COMMAND:
-
-		switch (LOWORD(wParam))
+		switch (uiMsg)
 		{
 
-		case ID_FILE_SETTINGS:
-		{
-			CSqrlSettingsDlg dlg;
-			dlg.DoModal();
-		}
-		break;
+		case WM_COMMAND:
 
-		case ID_FILE_ABOUT:
-		{
-			CSqrlAboutDlg dlg;
-			dlg.DoModal();
-		}
-		break;
-
-		case IDCANCEL:
-		case ID_FILE_EXITSQRLTRAY:
-			PostQuitMessage(0);
-			return FALSE;
-		}
-		break;
-
-	case WM_EX_MESSAGE:
-		if (wParam == SQRL_TRAY_ICON_ID)
-		{
-			switch (lParam)
+			switch (LOWORD(wParam))
 			{
 
-			case WM_RBUTTONUP:
-				ContextMenu(hDlg);
-				break;
-
-			case NIN_BALLOONUSERCLICK:
+			case ID_FILE_SETTINGS:
 			{
-
+				CSqrlSettingsDlg dlg;
+				dlg.DoModal();
 			}
 			break;
+
+			case ID_FILE_ABOUT:
+			{
+				CSqrlAboutDlg dlg;
+				dlg.DoModal();
 			}
+			break;
+
+			case IDCANCEL:
+			case ID_FILE_EXITSQRLTRAY:
+				PostQuitMessage(0);
+				return FALSE;
+			}
+			break;
+
+		case WM_EX_MESSAGE:
+			if (wParam == SQRL_TRAY_ICON_ID)
+			{
+				switch (lParam)
+				{
+
+				case WM_RBUTTONUP:
+					ContextMenu(hDlg);
+					break;
+
+				case NIN_BALLOONUSERCLICK:
+				{
+
+				}
+				break;
+				}
+			}
+			break;
 		}
-		break;
 	}
 	return FALSE;
 }
