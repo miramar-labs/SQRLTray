@@ -73,6 +73,7 @@
     <None Include="SqrlTray.rgs">
       <Filter>Resource Files</Filter>
     </None>
+    <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
     <Midl Include="SqrlTray.idl">

@@ -16,6 +16,15 @@
 
 using namespace ATL;
 
+#include <cpprest/http_client.h>
+#include <cpprest/filestream.h>
+#include <cpprest/uri.h>
+#include <thread>
+
+using namespace concurrency::streams;
+using namespace web::http::client;
+using namespace web::http;
+
 class CSqrlTrayModule : public ATL::CAtlExeModuleT< CSqrlTrayModule >
 {
 public :
@@ -43,6 +52,10 @@ bool	IsVista();
 HRESULT	InitNovaOptions();
 HRESULT	SwitchToSqrlProfile();
 void	UnInitNovaOptions();
+
+WCHAR szExeDirectory[MAX_PATH] = L"";
+
+void doRESTCall(const std::wstring& file);
 
 // Callbacks
 BOOL CALLBACK TrayProc(HWND, UINT, WPARAM, LPARAM);
@@ -251,7 +264,7 @@ HRESULT SwitchToSqrlProfile(){
 	}
 
 	// get the directory of the application to save the PDF fles there
-	WCHAR szExeDirectory[MAX_PATH] = L"";
+	//WCHAR szExeDirectory[MAX_PATH] = L"";
 	WCHAR drive[MAX_PATH], dir[MAX_PATH];
 	GetModuleFileNameW(NULL, szExeDirectory, MAX_PATH);
 	_wsplitpath(szExeDirectory, drive, dir, NULL, NULL);
@@ -261,7 +274,7 @@ HRESULT SwitchToSqrlProfile(){
 	// disable the "Save PDF file as" prompt
 	m_novaOptions->SetOptionLong(NOVAPDF_SAVE_PROMPT_TYPE, PROMPT_SAVE_NONE);
 
-	// set generated Pdf files destination folder ("c:\")
+	// set generated Pdf files destination folder 
 	m_novaOptions->SetOptionLong(NOVAPDF_SAVE_LOCATION, LOCATION_TYPE_LOCAL);
 	m_novaOptions->SetOptionLong(NOVAPDF_SAVE_FOLDER_TYPE, SAVEFOLDER_CUSTOM);
 	m_novaOptions->SetOptionString(NOVAPDF_SAVE_FOLDER, szExeDirectory);
@@ -287,22 +300,28 @@ HRESULT SwitchToSqrlProfile(){
 BOOL CALLBACK TrayProc(HWND hDlg, UINT uiMsg, WPARAM wParam, LPARAM lParam)
 {
 	if (uiMsg == wm_Nova_FileSaved){
-		ATLTRACE("MSG_NOVAPDF2_FILESAVED....");
+		ATLTRACE("MSG_NOVAPDF2_FILESAVED....\n");
 
+		std::wstring sFile(szExeDirectory); sFile += L"Sqrl.pdf";	//TODO use GetPDFFileName()
+		
 		// REST call here....
+		doRESTCall(sFile);
 
 		// bring up browser here.....
 
-		//TODO delete generated PDF ....
+		//delete generated PDF ....
+		DeleteFile(sFile.c_str());		//will fail if in use....
+
+
 	}
 	else if (uiMsg == wm_Nova_StartDoc){
-		ATLTRACE("MSG_NOVAPDF2_STARTDOC....");
+		ATLTRACE("MSG_NOVAPDF2_STARTDOC....\n");
 	}
 	else if (uiMsg == wm_Nova_EndDoc){
-		ATLTRACE("MSG_NOVAPDF2_ENDDOC....");
+		ATLTRACE("MSG_NOVAPDF2_ENDDOC....\n");
 	}
 	else if (uiMsg == wm_Nova_PrintError){
-		ATLTRACE("MSG_NOVAPDF2_PRINTERROR....");
+		ATLTRACE("MSG_NOVAPDF2_PRINTERROR....\n");
 		switch (wParam)
 		{
 		case ERROR_MSG_TEMP_FILE:
@@ -460,4 +479,23 @@ bool IsVista()
 	GetVersionEx(&osVer);
 	return (osVer.dwMajorVersion >= 6);*/
 	return false;
+}
+
+void doRESTCall(const std::wstring& file){
+	// Open stream to file.
+	/*file_stream<unsigned char>::open_istream(file).then([](basic_istream<unsigned char> fileStream)
+	{
+		// Make HTTP request with the file stream as the body.
+		http_client client(U("http://www.myhttpserver.com"));
+		client.request(methods::PUT, L"myfile", fileStream).then([fileStream](http_response response)
+		{
+			fileStream.close();
+			// Perform actions here to inspect the HTTP response...
+			if (response.status_code() == status_codes::OK)
+			{
+				//TODO: get sqrl GUID here....
+			}
+		});
+	});*/
+	//std::this_thread::sleep_for(std::chrono::seconds(10));
 }
