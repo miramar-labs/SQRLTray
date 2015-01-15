@@ -30,24 +30,22 @@ HICON								g_hAppMainICO;
 #endif
 
 NOTIFYICONDATA						g_nid;
-HINSTANCE							g_hInstance;
-HICON								g_hGhIconMain;
+HINSTANCE							g_hInstance = NULL;
+HICON								g_hGhIconMain = NULL;
 UINT								g_uShellRestart;
-HWND								g_hWndTray;
+HWND								g_hWndTray = NULL;
 
 BOOL	DoTrayIconAndTip(DWORD);
 BOOL	DoBalloonTip(LPTSTR sBalloonTitle, LPTSTR sBalloonTip, UINT uBalloonTimeout);
 void	ContextMenu(HWND);
 bool	IsVista();
 
-void	InitNovaOptions();
-void	SwitchToSqrlProfile();
+HRESULT	InitNovaOptions();
+HRESULT	SwitchToSqrlProfile();
 void	UnInitNovaOptions();
 
 // Callbacks
 BOOL CALLBACK TrayProc(HWND, UINT, WPARAM, LPARAM);
-
-#define CALL_OK(a) (a == S_OK)
 
 // Data 
 const int WM_EX_MESSAGE = (WM_APP + 1);
@@ -61,13 +59,13 @@ const UINT  wm_Nova_PrintError = RegisterWindowMessageW(MSG_NOVAPDF2_PRINTERROR)
 
 #define PRINTER_NAME        L"novaPDF SDK 8"
 #define SQRL_PROFILE		L"Sqrl Profile"
-#define PROFILE_IS_PUBLIC   0
+#define PROFILE_IS_PUBLIC   0	// private profile
 
-LPWSTR  m_wsProfileSqrl;
-LPWSTR  m_wsDefaultProfile;
-LPWSTR  m_strProfileId;
+LPWSTR  m_wsProfileSqrl = NULL;
+LPWSTR  m_wsDefaultProfile = NULL;
+LPWSTR  m_strProfileId = NULL;
 
-INovaPdfOptions80 *m_novaOptions;
+INovaPdfOptions80 *m_novaOptions = NULL;
 
 //
 extern "C" int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, 
@@ -119,146 +117,170 @@ extern "C" int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/
 	g_nid.uFlags = NIF_MESSAGE;
 	g_nid.uCallbackMessage = WM_EX_MESSAGE;
 
-	DoTrayIconAndTip(NIM_ADD);
+	if (SUCCEEDED(InitNovaOptions())){
 
-	DoBalloonTip(_T("SqrlTray!"), _T(" "), 10);
+		if (SUCCEEDED(SwitchToSqrlProfile())){
 
-	DoTrayIconAndTip(NIM_MODIFY);
+			DoTrayIconAndTip(NIM_ADD);
 
-	InitNovaOptions();
+			DoBalloonTip(_T("SqrlTray ready...!"), _T(" "), 10);
 
-	ATLTRACE("SqrlTray: ready!");
+			DoTrayIconAndTip(NIM_MODIFY);
 
-	MSG msg;
-	while (GetMessage(&msg, NULL, 0, 0))
-	{
-		if (msg.message == WM_QUIT){
-			ATLTRACE("WM_QUIT!!");
-			break;
+			MSG msg;
+			while (GetMessage(&msg, NULL, 0, 0))
+			{
+				if (msg.message == WM_QUIT){
+					ATLTRACE("WM_QUIT!!");
+					break;
+				}
+
+				if (!IsDialogMessage(g_hWndTray, &msg))
+				{
+					TranslateMessage(&msg);
+					DispatchMessage(&msg);
+				}
+			}
 		}
-
-		if (!IsDialogMessage(g_hWndTray, &msg))
-		{
-			TranslateMessage(&msg);
-			DispatchMessage(&msg);
-		}
-		//ATLTRACE("sqrlTray: processing messages...\n");
 	}
 
+	//cleanup: 
 	UnInitNovaOptions();
-	m_novaOptions->Release();
+
+	if (m_novaOptions)
+		m_novaOptions->Release();
 	m_novaOptions = NULL;
 
 	DoTrayIconAndTip(NIM_DELETE);
 
 #ifdef _NEWBTIP
-	DestroyIcon(g_hAppMainICO);
+	if (g_hAppMainICO)
+		DestroyIcon(g_hAppMainICO);
 #endif
 	DestroyWindow(g_hWndTray);
-	DestroyIcon(g_hGhIconMain);
+
+	if (g_hGhIconMain)
+		DestroyIcon(g_hGhIconMain);
 
 	CoUninitialize();
 
 	return 0;
 }
 
-void InitNovaOptions(){
-	m_wsDefaultProfile = NULL;
+HRESULT InitNovaOptions(){
+
 	HRESULT hr = CoCreateInstance(__uuidof(NovaPdfOptions80), NULL, CLSCTX_INPROC_SERVER, __uuidof(INovaPdfOptions80), (LPVOID*)&m_novaOptions);
-	if (SUCCEEDED(hr))
-	{
-		// initialize the NovaPdfOptions object to use with a printer licensed for SDK
-		// if you have an application license for novaPDF SDK, 
-		// pass the license key to the Initialize() function
-		hr = m_novaOptions->Initialize(PRINTER_NAME, L"");
-
-		hr = m_novaOptions->RegisterEventWindow((LONG)g_hWndTray);
+	if (!SUCCEEDED(hr)){
+		DoBalloonTip(_T("SqrlTray"), _T("Error getting novaPDF options - check installation"), 10);
+		return hr;
 	}
-	else{
 
-		//TODO- error
+	// initialize the NovaPdfOptions object to use with a printer licensed for SDK
+	// if you have an application license for novaPDF SDK, 
+	// pass the license key to the Initialize() function
+	hr = m_novaOptions->Initialize(PRINTER_NAME, L"");	//TODO - license key...
+	if (!SUCCEEDED(hr)){
+		DoBalloonTip(_T("SqrlTray"), _T("Error initializing novaPDF printer - check installation"), 10);
+		return hr;
 	}
+
+	hr = m_novaOptions->RegisterEventWindow((LONG)g_hWndTray);
+	if (!SUCCEEDED(hr)){
+		DoBalloonTip(_T("SqrlTray"), _T("Error registering for novaPDF events - check installation"), 10);
+		return hr;
+	}
+
+	return S_OK;
 }
 
 void UnInitNovaOptions(){
 	if (m_novaOptions) {
+
 		//unregister events
 		m_novaOptions->UnRegisterEventWindow();
+
 		//restore default profile
-		m_novaOptions->SetActiveProfile(m_wsDefaultProfile);
+		if (m_wsDefaultProfile)
+			m_novaOptions->SetActiveProfile(m_wsDefaultProfile);
 
 		//delete newly created profile
-		m_novaOptions->DeleteProfile(m_wsProfileSqrl);
+		if (m_wsProfileSqrl)
+			m_novaOptions->DeleteProfile(m_wsProfileSqrl);
+
 		//free memory
-		CoTaskMemFree(m_wsProfileSqrl);
-		CoTaskMemFree(m_wsDefaultProfile);
-		m_wsDefaultProfile = NULL;
-		m_wsProfileSqrl = NULL;
+		if (m_wsProfileSqrl){
+			CoTaskMemFree(m_wsProfileSqrl);
+			m_wsProfileSqrl = NULL;
+		}
+		if (m_wsDefaultProfile){
+			CoTaskMemFree(m_wsDefaultProfile);
+			m_wsDefaultProfile = NULL;
+		}
+
 		//restore default printer
 		m_novaOptions->RestoreDefaultPrinter();
 	}
 }
 
-void SwitchToSqrlProfile(){
-	/////////////////////////////////////////////////////////////////////////////
-	//   NOVAPDF CODE
-	/////////////////////////////////////////////////////////////////////////////
-	//set novaPDF default printer
-	if (m_novaOptions)
-	{
-		m_novaOptions->SetDefaultPrinter();
-		HRESULT hr;
-		hr = m_novaOptions->GetActiveProfile(&m_wsDefaultProfile);
+HRESULT SwitchToSqrlProfile(){
 
-		//create a new profile with default settings
-		hr = m_novaOptions->AddProfile(SQRL_PROFILE, PROFILE_IS_PUBLIC, &m_wsProfileSqrl);
+	//set novaPDF default printer 
+	ATLASSERT(m_novaOptions);
 
-		//load the newly created profile
-		if (SUCCEEDED(hr) && m_wsProfileSqrl)
-		{
+	m_novaOptions->SetDefaultPrinter();
+
+	HRESULT hr;
+	hr = m_novaOptions->GetActiveProfile(&m_wsDefaultProfile);	// may be NULL
+
+	//create a new profile with default settings
+	hr = m_novaOptions->AddProfile(SQRL_PROFILE, PROFILE_IS_PUBLIC, &m_wsProfileSqrl);
+	switch(hr){
+		case S_OK:
+			ATLASSERT(m_wsProfileSqrl);
 			hr = m_novaOptions->LoadProfile(m_wsProfileSqrl);
-		}
-		else
-		{
-			//TODO MessageBox(L"Failed to create profile", L"novaPDF", MB_OK);
-			//return hr;
-			ATLASSERT(FALSE);
-		}
-
-		//load profile
-		hr = m_novaOptions->LoadProfile(SQRL_PROFILE);
-
-		// get the directory of the application to save the PDF fles there
-		WCHAR szExeDirectory[MAX_PATH] = L"";
-		WCHAR drive[MAX_PATH], dir[MAX_PATH];
-		GetModuleFileNameW(NULL, szExeDirectory, MAX_PATH);
-		_wsplitpath(szExeDirectory, drive, dir, NULL, NULL);
-		wcscpy(szExeDirectory, drive);
-		wcscat(szExeDirectory, dir);
-
-		// disable the "Save PDF file as" prompt
-		m_novaOptions->SetOptionLong(NOVAPDF_SAVE_PROMPT_TYPE, PROMPT_SAVE_NONE);
-
-		// set generated Pdf files destination folder ("c:\")
-		m_novaOptions->SetOptionLong(NOVAPDF_SAVE_LOCATION, LOCATION_TYPE_LOCAL);
-		m_novaOptions->SetOptionLong(NOVAPDF_SAVE_FOLDER_TYPE, SAVEFOLDER_CUSTOM);
-		m_novaOptions->SetOptionString(NOVAPDF_SAVE_FOLDER, szExeDirectory);
-
-		// set output file name
-		m_novaOptions->SetOptionString(NOVAPDF_SAVE_FILE_NAME, L"Sqrl.pdf");
-
-		// if file exists in the destination folder, append a counter to the end of the file name
-		m_novaOptions->SetOptionLong(NOVAPDF_SAVE_FILEEXIST_ACTION, FILE_CONFLICT_STRATEGY_AUTONUMBER_NEW);
-
-		m_novaOptions->SetOptionBool(NOVAPDF_ACTION_DEFAULT_VIEWER, FALSE);
-
-		//save profile changes
-		m_novaOptions->SaveProfile();
-
-		// switch active profile to Sqrl...
-		m_novaOptions->SetActiveProfile(SQRL_PROFILE);
-
+			ATLASSERT(SUCCEEDED(hr) && m_wsProfileSqrl);
+			break;
+		case NV_NOT_INITIALIZED:// Initialize was not called
+		case NV_SERVICE_ERROR:// cannot connect to novaPDF Server service
+		case NV_PROFILE_ERROR://cannot read default profile
+		case NV_PROFILE_SAVE_ERROR://cannot save new profile
+			// maybe it already exists... just load it ...
+			//TODO
+			DoBalloonTip(_T("SqrlTray"), _T("Error creating Sqrl profile..."), 10);
+			return S_FALSE;
 	}
+
+	// get the directory of the application to save the PDF fles there
+	WCHAR szExeDirectory[MAX_PATH] = L"";
+	WCHAR drive[MAX_PATH], dir[MAX_PATH];
+	GetModuleFileNameW(NULL, szExeDirectory, MAX_PATH);
+	_wsplitpath(szExeDirectory, drive, dir, NULL, NULL);
+	wcscpy(szExeDirectory, drive);
+	wcscat(szExeDirectory, dir);
+
+	// disable the "Save PDF file as" prompt
+	m_novaOptions->SetOptionLong(NOVAPDF_SAVE_PROMPT_TYPE, PROMPT_SAVE_NONE);
+
+	// set generated Pdf files destination folder ("c:\")
+	m_novaOptions->SetOptionLong(NOVAPDF_SAVE_LOCATION, LOCATION_TYPE_LOCAL);
+	m_novaOptions->SetOptionLong(NOVAPDF_SAVE_FOLDER_TYPE, SAVEFOLDER_CUSTOM);
+	m_novaOptions->SetOptionString(NOVAPDF_SAVE_FOLDER, szExeDirectory);
+
+	// set output file name
+	m_novaOptions->SetOptionString(NOVAPDF_SAVE_FILE_NAME, L"Sqrl.pdf");
+
+	// if file exists in the destination folder, append a counter to the end of the file name
+	m_novaOptions->SetOptionLong(NOVAPDF_SAVE_FILEEXIST_ACTION, FILE_CONFLICT_STRATEGY_AUTONUMBER_NEW);
+
+	m_novaOptions->SetOptionBool(NOVAPDF_ACTION_DEFAULT_VIEWER, FALSE);
+
+	//save profile changes
+	m_novaOptions->SaveProfile();
+
+	// switch active profile to Sqrl...
+	m_novaOptions->SetActiveProfile(m_wsProfileSqrl);
+
+	return S_OK;
 }
 
 
