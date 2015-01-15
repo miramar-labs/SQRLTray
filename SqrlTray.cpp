@@ -40,6 +40,10 @@ BOOL	DoBalloonTip(LPTSTR sBalloonTitle, LPTSTR sBalloonTip, UINT uBalloonTimeout
 void	ContextMenu(HWND);
 bool	IsVista();
 
+void	InitNovaOptions();
+void	SwitchToSqrlProfile();
+void	UnInitNovaOptions();
+
 // Callbacks
 BOOL CALLBACK TrayProc(HWND, UINT, WPARAM, LPARAM);
 
@@ -56,9 +60,12 @@ const UINT  wm_Nova_FileSaved = RegisterWindowMessageW(MSG_NOVAPDF2_FILESAVED);
 const UINT  wm_Nova_PrintError = RegisterWindowMessageW(MSG_NOVAPDF2_PRINTERROR);
 
 #define PRINTER_NAME        L"novaPDF SDK 8"
-#define SMALL_SIZE_PROFILE  L"Small Size Profile"
-#define FULL_OPT_PROFILE    L"Full Options Profile"
+#define SQRL_PROFILE		L"Sqrl Profile"
 #define PROFILE_IS_PUBLIC   0
+
+LPWSTR  m_wsProfileSqrl;
+LPWSTR  m_wsDefaultProfile;
+LPWSTR  m_strProfileId;
 
 INovaPdfOptions80 *m_novaOptions;
 
@@ -118,24 +125,9 @@ extern "C" int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/
 
 	DoTrayIconAndTip(NIM_MODIFY);
 
+	InitNovaOptions();
+
 	ATLTRACE("SqrlTray: ready!");
-
-	//create an instance of INovaPdfOptions
-	HRESULT hr = CoCreateInstance(__uuidof(NovaPdfOptions80), NULL, CLSCTX_INPROC_SERVER, __uuidof(INovaPdfOptions80), (LPVOID*)&m_novaOptions);
-	if (SUCCEEDED(hr))
-	{
-		// initialize the NovaPdfOptions object to use with a printer licensed for SDK
-		// if you have an application license for novaPDF SDK, 
-		// pass the license key to the Initialize() function
-		hr = m_novaOptions->Initialize(PRINTER_NAME, L"");
-
-		hr = m_novaOptions->RegisterEventWindow((LONG)g_hWndTray);
-	}
-	else
-	{
-		::MessageBoxW(NULL, L"Failed to create novaPDF COM object", L"novaPDF", MB_OK);
-	}
-
 
 	MSG msg;
 	while (GetMessage(&msg, NULL, 0, 0))
@@ -153,6 +145,10 @@ extern "C" int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/
 		//ATLTRACE("sqrlTray: processing messages...\n");
 	}
 
+	UnInitNovaOptions();
+	m_novaOptions->Release();
+	m_novaOptions = NULL;
+
 	DoTrayIconAndTip(NIM_DELETE);
 
 #ifdef _NEWBTIP
@@ -166,10 +162,116 @@ extern "C" int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/
 	return 0;
 }
 
+void InitNovaOptions(){
+	m_wsDefaultProfile = NULL;
+	HRESULT hr = CoCreateInstance(__uuidof(NovaPdfOptions80), NULL, CLSCTX_INPROC_SERVER, __uuidof(INovaPdfOptions80), (LPVOID*)&m_novaOptions);
+	if (SUCCEEDED(hr))
+	{
+		// initialize the NovaPdfOptions object to use with a printer licensed for SDK
+		// if you have an application license for novaPDF SDK, 
+		// pass the license key to the Initialize() function
+		hr = m_novaOptions->Initialize(PRINTER_NAME, L"");
+
+		hr = m_novaOptions->RegisterEventWindow((LONG)g_hWndTray);
+	}
+	else{
+
+		//TODO- error
+	}
+}
+
+void UnInitNovaOptions(){
+	if (m_novaOptions) {
+		//unregister events
+		m_novaOptions->UnRegisterEventWindow();
+		//restore default profile
+		m_novaOptions->SetActiveProfile(m_wsDefaultProfile);
+
+		//delete newly created profile
+		m_novaOptions->DeleteProfile(m_wsProfileSqrl);
+		//free memory
+		CoTaskMemFree(m_wsProfileSqrl);
+		CoTaskMemFree(m_wsDefaultProfile);
+		m_wsDefaultProfile = NULL;
+		m_wsProfileSqrl = NULL;
+		//restore default printer
+		m_novaOptions->RestoreDefaultPrinter();
+	}
+}
+
+void SwitchToSqrlProfile(){
+	/////////////////////////////////////////////////////////////////////////////
+	//   NOVAPDF CODE
+	/////////////////////////////////////////////////////////////////////////////
+	//set novaPDF default printer
+	if (m_novaOptions)
+	{
+		m_novaOptions->SetDefaultPrinter();
+		HRESULT hr;
+		hr = m_novaOptions->GetActiveProfile(&m_wsDefaultProfile);
+
+		//create a new profile with default settings
+		hr = m_novaOptions->AddProfile(SQRL_PROFILE, PROFILE_IS_PUBLIC, &m_wsProfileSqrl);
+
+		//load the newly created profile
+		if (SUCCEEDED(hr) && m_wsProfileSqrl)
+		{
+			hr = m_novaOptions->LoadProfile(m_wsProfileSqrl);
+		}
+		else
+		{
+			//TODO MessageBox(L"Failed to create profile", L"novaPDF", MB_OK);
+			//return hr;
+			ATLASSERT(FALSE);
+		}
+
+		//load profile
+		hr = m_novaOptions->LoadProfile(SQRL_PROFILE);
+
+		// get the directory of the application to save the PDF fles there
+		WCHAR szExeDirectory[MAX_PATH] = L"";
+		WCHAR drive[MAX_PATH], dir[MAX_PATH];
+		GetModuleFileNameW(NULL, szExeDirectory, MAX_PATH);
+		_wsplitpath(szExeDirectory, drive, dir, NULL, NULL);
+		wcscpy(szExeDirectory, drive);
+		wcscat(szExeDirectory, dir);
+
+		// disable the "Save PDF file as" prompt
+		m_novaOptions->SetOptionLong(NOVAPDF_SAVE_PROMPT_TYPE, PROMPT_SAVE_NONE);
+
+		// set generated Pdf files destination folder ("c:\")
+		m_novaOptions->SetOptionLong(NOVAPDF_SAVE_LOCATION, LOCATION_TYPE_LOCAL);
+		m_novaOptions->SetOptionLong(NOVAPDF_SAVE_FOLDER_TYPE, SAVEFOLDER_CUSTOM);
+		m_novaOptions->SetOptionString(NOVAPDF_SAVE_FOLDER, szExeDirectory);
+
+		// set output file name
+		m_novaOptions->SetOptionString(NOVAPDF_SAVE_FILE_NAME, L"Sqrl.pdf");
+
+		// if file exists in the destination folder, append a counter to the end of the file name
+		m_novaOptions->SetOptionLong(NOVAPDF_SAVE_FILEEXIST_ACTION, FILE_CONFLICT_STRATEGY_AUTONUMBER_NEW);
+
+		m_novaOptions->SetOptionBool(NOVAPDF_ACTION_DEFAULT_VIEWER, FALSE);
+
+		//save profile changes
+		m_novaOptions->SaveProfile();
+
+		// switch active profile to Sqrl...
+		m_novaOptions->SetActiveProfile(SQRL_PROFILE);
+
+	}
+}
+
+
 BOOL CALLBACK TrayProc(HWND hDlg, UINT uiMsg, WPARAM wParam, LPARAM lParam)
 {
 	if (uiMsg == wm_Nova_FileSaved){
 		ATLTRACE("MSG_NOVAPDF2_FILESAVED....");
+
+		// REST call here....
+
+		// bring up browser here.....
+
+		//TODO delete generated PDF ....
 	}
 	else if (uiMsg == wm_Nova_StartDoc){
 		ATLTRACE("MSG_NOVAPDF2_STARTDOC....");
@@ -179,6 +281,22 @@ BOOL CALLBACK TrayProc(HWND hDlg, UINT uiMsg, WPARAM wParam, LPARAM lParam)
 	}
 	else if (uiMsg == wm_Nova_PrintError){
 		ATLTRACE("MSG_NOVAPDF2_PRINTERROR....");
+		switch (wParam)
+		{
+		case ERROR_MSG_TEMP_FILE:
+			DoBalloonTip(_T("SqrlTray"), _T("Error saving temporary file on printer server"), 10);
+			break;
+		case ERROR_MSG_LIC_INFO:
+			DoBalloonTip(_T("SqrlTray"), _T("Error reading license information"), 10);
+			break;
+		case ERROR_MSG_SAVE_PDF:
+			DoBalloonTip(_T("SqrlTray"), _T("Error saving PDF file"), 10);
+			break;
+		case ERROR_MSG_JOB_CANCELED:
+			DoBalloonTip(_T("SqrlTray"), _T("Print job was canceled"), 10);
+			break;
+		}
+
 	}
 	else{
 
@@ -312,7 +430,7 @@ void ContextMenu(HWND hwnd)
 	DestroyMenu(hmenu);
 }
 
-bool IsVista()	// logic using this was if !IsVista then XP ... 
+bool IsVista()	
 {
 	/*TODO OSVERSIONINFO osVer;
 	memset(&osVer, 0, sizeof(OSVERSIONINFO));
